@@ -13,10 +13,6 @@ import (
 	"github.com/h1067675/gophermart/internal/logger"
 )
 
-type Configurer interface {
-	InitializeConfigurer(server string, db string, system string, reload bool) *Config
-}
-
 // structure of the server settings
 type Config struct {
 	RunAddress           NetAddress

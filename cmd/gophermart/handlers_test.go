@@ -53,11 +53,14 @@ type want struct {
 	headerCode int
 }
 
-type Configurer struct {
-	configurer.Configurer
+type Configurer interface {
+	InitializeConfigurer(server string, db string, system string, reload bool) *configurer.Config
 }
 
-func (c Configurer) InitializeConfigurer(server string, db string, system string, reload bool) *configurer.Config {
+type Config struct {
+}
+
+func (c Config) InitializeConfigurer(server string, db string, system string, reload bool) *configurer.Config {
 	var result = configurer.Config{ // set defaul settins
 		ReloadTables: reload,
 	}
@@ -179,7 +182,7 @@ func TestUserRegisterHandler(t *testing.T) {
 			},
 		},
 	}
-	var configurer Configurer
+	var configurer Config
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
@@ -355,7 +358,7 @@ func TestUserLoginHandler(t *testing.T) {
 			},
 		},
 	}
-	var configurer Configurer
+	var configurer Config
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
@@ -660,7 +663,7 @@ func TestUserLoadOrdersHandler(t *testing.T) {
 			},
 		},
 	}
-	var configurer Configurer
+	var configurer Config
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
@@ -825,7 +828,7 @@ func TestUserGetOrdersHandler(t *testing.T) {
 			},
 		},
 	}
-	var configurer Configurer
+	var configurer Config
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
@@ -966,7 +969,7 @@ func TestUserGetBalanceHandler(t *testing.T) {
 			},
 		},
 	}
-	var configurer Configurer
+	var configurer Config
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
@@ -1164,7 +1167,7 @@ func TestUserGetBalanceWithdrawHandler(t *testing.T) {
 			},
 		},
 	}
-	var configurer Configurer
+	var configurer Config
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
@@ -1334,7 +1337,7 @@ func TestUserGetWithdrawalsHandler(t *testing.T) {
 			},
 		},
 	}
-	var configurer Configurer
+	var configurer Config
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
