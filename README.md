@@ -4,6 +4,6 @@
 
 # Как построена система
 
-![Структура базы данных](https://github.com/h1067675/gophermart/blob/46f1e46a6840ad7842c2b82d5799b5a0f3c7bac3/docs/gophermart.png)
+![Структура базы данных](/docs/gophermart.png)
 
-![Схема взаимодействия компонентов](https://github.com/h1067675/gophermart/blob/46f1e46a6840ad7842c2b82d5799b5a0f3c7bac3/docs/postgres-db.png)
+![Схема взаимодействия компонентов](/docs/postgres-db.png)
