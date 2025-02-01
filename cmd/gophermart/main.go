@@ -25,7 +25,7 @@ func main() {
 	conf := config.InitializeConfigurer("localhost:8080",
 		"host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer",
 		"localhost:8090",
-		true)
+		false)
 	var depositary = depository.InitializeStorager(conf)
 	var loader = loader.InitializeLoader(depositary, conf.GetAccrualSystemAddress(), time.Second*30, 10)
 	go loader.QuereManager()
