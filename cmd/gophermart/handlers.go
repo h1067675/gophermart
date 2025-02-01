@@ -12,6 +12,7 @@ import (
 	"github.com/theplant/luhn"
 
 	"github.com/h1067675/gophermart/cmd/depository"
+	"github.com/h1067675/gophermart/cmd/loader"
 	"github.com/h1067675/gophermart/internal/authorization"
 	"github.com/h1067675/gophermart/internal/logger"
 )
@@ -71,6 +72,7 @@ func setAuthirizationCookie(response http.ResponseWriter, token string) {
 func (c *Connect) UserRegisterHandler(response http.ResponseWriter, request *http.Request) {
 	if !strings.Contains(request.Header.Get("Content-Type"), "application/json") {
 		response.WriteHeader(http.StatusBadRequest)
+		return
 	}
 	var register userLoginJSON
 	if err := register.parse(*request); err != nil {
@@ -109,6 +111,7 @@ func (c *Connect) UserRegisterHandler(response http.ResponseWriter, request *htt
 func (c *Connect) UserLoginHandler(response http.ResponseWriter, request *http.Request) {
 	if !strings.Contains(request.Header.Get("Content-Type"), "application/json") {
 		response.WriteHeader(http.StatusBadRequest)
+		return
 	}
 	var loginUser userLoginJSON
 	if err := loginUser.parse(*request); err != nil {
@@ -188,8 +191,10 @@ func (c *Connect) UserLoadOrdersHandler(response http.ResponseWriter, request *h
 		return
 	}
 
-	if c.Depository.OrderNew(userID.(int), order) {
+	if c.Depository.OrderNew(userID.(int), order, depository.OrderNew) {
 		response.WriteHeader(http.StatusAccepted)
+		c.Loader.Quere.NewOrders <- loader.Order{Order: order, Status: depository.OrderNew}
+		logger.Log.Infof("order %v sended to NewOrders channel", order)
 		return
 	}
 	response.WriteHeader(http.StatusInternalServerError)

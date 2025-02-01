@@ -1,10 +1,11 @@
 package loader
 
 import (
+	"container/heap"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,227 +15,327 @@ import (
 )
 
 type Loader struct {
+	Config     Config
+	QueryLimit QueryLimit
+	HTTPClient *client.Client
+	Depository *depository.Storage
+	Mutex      Mutex
+	Quere      Quere
+}
+
+type Config struct {
 	Server      string
 	Periodicity time.Duration
-	Depository  *depository.Storage
-	Client      client.Client
+	Workers     int
 }
 
-func InitializeLoader(depository *depository.Storage, server string, periodicity time.Duration) Loader {
-	var loader = Loader{
-		Server:      server,
-		Periodicity: periodicity,
-		Depository:  depository,
+type QueryLimit struct {
+	Mu          sync.Mutex
+	QueryLimit  int
+	QueryTicker int
+}
+
+type Mutex struct {
+	Pause     bool
+	ChPause   chan struct{}
+	StartTime time.Time
+	sync.Mutex
+}
+
+type Quere struct {
+	PriorityQueue PriorityQueue
+	Buffer        Buffer
+	SecondBuffer  Buffer
+	OldBuffer     Buffer
+	NewOrders     chan Order
+	Processing    chan Order
+	Result        chan Order
+}
+
+type Buffer struct {
+	Orders []Order
+	Mu     sync.Mutex
+}
+type Order struct {
+	Order   int
+	Status  string
+	Times   int
+	Accrual float64
+}
+
+func (l *Loader) wait(s string) {
+	logger.Log.Info("mutex: check pause")
+	if t, ok := l.HTTPClient.TooManyRequests[s]; ok {
+		logger.Log.Info("mutex: pause is true, wait context")
+		<-t.ChDone
+		logger.Log.Info("mutex: context getting, return")
+		return
 	}
-	return loader
+	logger.Log.Info("mutex: pause is false")
+
 }
 
-func (l Loader) updateOrder(chIn chan struct {
-	order   int
-	status  string
-	accrual float64
-}) {
-	for ch := range chIn {
-		logger.Log.Infof("loader: data is received from the channel")
-		tx, err := l.Depository.DB.Begin()
-		if err != nil {
-			return
-		}
-		logger.Log.Infof("loader: DB transaction begin")
-		if ch.status != "" {
-			err = l.Depository.OrderStatusUpdate(ch.order, ch.status, ch.accrual, tx)
-			if err != nil {
-				tx.Rollback()
-			}
-			var userID int
-			userID, err = l.Depository.OrderUserCheck(ch.order)
-			if err != nil {
-				tx.Rollback()
-			}
+func InitializeLoader(depository *depository.Storage, server string, periodicity time.Duration, workers int) *Loader {
+	var c client.Client
+	c.Init()
+	var loader = Loader{
+		QueryLimit: QueryLimit{
+			QueryLimit: 1000,
+		},
+		Config: Config{
+			Server:      server,
+			Periodicity: periodicity,
+			Workers:     workers,
+		},
+		Depository: depository,
+		Quere: Quere{
+			NewOrders:  make(chan Order, 100),
+			Processing: make(chan Order, 100),
+			Result:     make(chan Order, 100),
+		},
+		Mutex: Mutex{
+			ChPause: make(chan struct{}),
+		},
+		HTTPClient: &c,
+	}
+	return &loader
+}
 
-			err = l.Depository.UserBalanceUpdate(userID, ch.accrual, 0, tx)
-			if err != nil {
-				tx.Rollback()
-			}
+func (o *Order) getPriority() int {
+	switch {
+	case o.Times <= 3:
+		return 1
+	case 3 < o.Times && o.Times <= 6:
+		return 2
+	case 6 < o.Times:
+		return 3
+	}
+	return 1
+}
+
+func (n *Loader) uploader(worker int, jobs <-chan Order, results chan<- Order) {
+	logger.Log.Infof("loader: start worker %v", worker)
+	for j := range jobs {
+		start := time.Now()
+		logger.Log.Infof("loader: order received %v to worker %v", j.Order, worker)
+		res, err := n.NgetOrderStatusFromServerAPI(j)
+		if err != nil || res.Status != depository.OrderProcessed {
+			heap.Push(&n.Quere.PriorityQueue, &Item{value: j, priority: j.getPriority(), index: len(n.Quere.PriorityQueue)})
+		} else {
+			results <- res
+			logger.Log.Infof("loader: responce received %v", res)
 		}
-		tx.Commit()
+		logger.Log.Infof("loader: time work %v, worker %v", time.Since(start), worker)
+	}
+}
+
+func (n *Loader) NStartLoader() {
+	for w := 1; w <= n.Config.Workers; w++ {
+		go n.uploader(w, n.Quere.Processing, n.Quere.Result)
+	}
+
+	for j := range n.Quere.Result {
+		go n.NupdateOrder(j)
 	}
 }
 
 type responseCalculator struct {
 	Order   string  `json:"order"`
 	Status  string  `json:"status"`
-	Accrual float64 `json:"accrual"`
+	Accrual float64 `json:"accrual,omitempty"`
 }
 
-func (l Loader) UpdateOrdersStatuses(orders []int) (err error) {
-	chDone := make(chan struct{})
-	defer close(chDone)
-	inputCh := l.generator(chDone, orders)
-
-	channels := l.fanOut(chDone, inputCh, len(orders))
-
-	collectResultCh := l.fanIn(chDone, channels...)
-
-	l.updateOrder(collectResultCh)
-
-	return errors.New("error of update statuses")
-}
-
-func (l Loader) generator(chDone chan struct{}, orders []int) chan struct {
-	order int
-} {
-	chRes := make(chan struct {
-		order int
-	})
-	go func() {
-		defer close(chRes)
-		for _, e := range orders {
-			select {
-			case <-chDone:
-				return
-			case chRes <- struct {
-				order int
-			}{order: e}:
-			}
-		}
-	}()
-	return chRes
-}
-
-func (l Loader) fanOut(chDone chan struct{}, chIn chan struct {
-	order int
-}, nWorkers int) []chan struct {
-	order   int
-	status  string
-	accrual float64
-} {
-	channels := make([]chan struct {
-		order   int
-		status  string
-		accrual float64
-	}, nWorkers)
-
-	for i := 0; i < nWorkers; i++ {
-		addRes := l.getOrderStatusFromServerAPI(chDone, chIn)
-		channels[i] = addRes
+func (q *QueryLimit) addQuery() {
+	logger.Log.Infof("loader: try to get 1 query from %v, busy %v", q.QueryLimit, q.QueryTicker)
+	if q.QueryTicker == q.QueryLimit {
+		logger.Log.Infof("loader: query limit %v per seccond is full, ", q.QueryLimit)
+		q.addQuery()
 	}
-	return channels
+	q.add()
+}
+func (q *QueryLimit) setNewQueryLimit(i int) {
+	q.Mu.Lock()
+	defer q.Mu.Unlock()
+	q.QueryLimit = i
 }
 
-func (l Loader) fanIn(chDone chan struct{}, resultChs ...chan struct {
-	order   int
-	status  string
-	accrual float64
-}) chan struct {
-	order   int
-	status  string
-	accrual float64
-} {
-	finalCh := make(chan struct {
-		order   int
-		status  string
-		accrual float64
-	})
-	var wg sync.WaitGroup
-	for _, ch := range resultChs {
-		chClosure := ch
-		wg.Add(1)
+func (q *QueryLimit) queryTickerTimer() {
+	time.Sleep(time.Second * 60)
+	q.remove()
+}
 
-		go func() {
-			defer wg.Done()
-			for data := range chClosure {
-				select {
-				case <-chDone:
-					return
-				case finalCh <- data:
-				}
-			}
-		}()
+func (q *QueryLimit) add() {
+	logger.Log.Infof("loader: allowed 1 query from %v, busy %v", q.QueryLimit, q.QueryTicker)
+	q.Mu.Lock()
+	logger.Log.Infof("loader: QueryLimit: mutex.Lock()")
+	defer func() {
+		q.Mu.Unlock()
+		logger.Log.Infof("loader: QueryLimit: mutex.Unlock()")
+	}()
+	q.QueryTicker++
+}
+
+func (q *QueryLimit) remove() {
+	logger.Log.Infof("loader: free 1 query from %v, busy %v", q.QueryLimit, q.QueryTicker)
+	q.Mu.Lock()
+	logger.Log.Infof("loader: QueryLimit: mutex.Lock()")
+	defer func() {
+		q.Mu.Unlock()
+		logger.Log.Infof("loader: QueryLimit: mutex.Unlock()")
+	}()
+	q.QueryTicker--
+}
+
+func (l *Loader) NgetOrderStatusFromServerAPI(order Order) (result Order, err error) {
+	result = order
+	logger.Log.Infof("loader: query - GET %s/api/orders/%v", l.Config.Server, order)
+	l.wait(l.Config.Server)
+	l.QueryLimit.addQuery()
+	go l.QueryLimit.queryTickerTimer()
+	body, HTTPStatus, timeout, err := l.HTTPClient.GET(l.Config.Server, "/api/orders/", order.Order)
+	if err != nil {
+		logger.Log.WithError(err).Error("error getting status from outer sistem")
+		return
 	}
-
-	go func() {
-		wg.Wait()
-		close(finalCh)
-	}()
-
-	return finalCh
-}
-
-func (l Loader) getOrderStatusFromServerAPI(chDone chan struct{}, inChan chan struct {
-	order int
-}) chan struct {
-	order   int
-	status  string
-	accrual float64
-} {
-	chResult := make(chan struct {
-		order   int
-		status  string
-		accrual float64
-	})
-	go func() {
-		defer close(chResult)
-		select {
-		case <-chDone:
-			return
-		case in := <-inChan:
-			logger.Log.Infof("loader: query - GET %s/api/orders/%v", l.Server, in.order)
-			body, status, err := l.Client.GET(l.Server, "/api/orders/", in.order)
-			if err != nil {
-				logger.Log.WithError(err).Error("error getting status from outer sistem")
-				return
-			}
-			logger.Log.Infof("loader: answer - get response with status %v and body %s", status, string(body))
-			if status == http.StatusNoContent {
-				chResult <- struct {
-					order   int
-					status  string
-					accrual float64
-				}{order: in.order, status: depository.OrderInvalid}
-			}
-			if status == http.StatusTooManyRequests || status == http.StatusInternalServerError {
-				chResult <- struct {
-					order   int
-					status  string
-					accrual float64
-				}{order: in.order, status: ""}
-			}
-			if status == http.StatusOK {
-				var js responseCalculator
-				err := json.Unmarshal(body, &js)
-				if err != nil {
-					logger.Log.WithError(err).Error("loader: json parsing error")
-				}
-				order, err := strconv.Atoi(js.Order)
-				if err != nil {
-					logger.Log.WithError(err).Error("loader: order is not number")
-				}
-				if order != in.order {
-					logger.Log.Info("loader: order number from the external service does not match the internal number")
-					return
-				}
-				chResult <- struct {
-					order   int
-					status  string
-					accrual float64
-				}{order: in.order, status: js.Status, accrual: js.Accrual}
-			}
-
-		}
-	}()
-	return chResult
-}
-func (l Loader) StartLoader() {
-	for {
-		logger.Log.Info("loader: checking orders to update")
-		orders, err := l.Depository.OrderGetOrdersInProcess()
-		if err != nil {
-			logger.Log.WithError(err).Error("loader: database error")
+	if HTTPStatus == http.StatusTooManyRequests {
+		logger.Log.Infof("loader: answer - get response with status Too Many Requests and timeout %v", timeout)
+		s := strings.Replace(string(body), "No more than ", "", -1)
+		s = strings.Replace(s, " requests per minute allowed", "", -1)
+		lim, err2 := strconv.Atoi(s)
+		if err2 != nil {
+			logger.Log.Error(err)
 		} else {
-			logger.Log.Info("loader: get orders for upload statuses", orders)
-			l.UpdateOrdersStatuses(orders)
+			logger.Log.Infof("loader:set new query limit is %v times in second", lim)
+			l.QueryLimit.setNewQueryLimit(lim)
 		}
-		time.Sleep(l.Periodicity)
+		result.Times += 3
+		return
 	}
+	result.Times++
+	if HTTPStatus == http.StatusNoContent {
+		result.Times += 3
+		return
+	}
+	if HTTPStatus == http.StatusOK {
+		var js responseCalculator
+		err = json.Unmarshal(body, &js)
+		if err != nil {
+			logger.Log.WithError(err).Error("loader: json parsing error")
+			return
+		}
+		var outOrder int
+		outOrder, err = strconv.Atoi(js.Order)
+		if err != nil {
+			logger.Log.WithError(err).Error("loader: order is not number")
+			return
+		}
+		if order.Order != outOrder {
+			logger.Log.Info("loader: order number from the external service does not match the internal number")
+			return
+		}
+		if js.Status == depository.OrderProcessed {
+			result.Status = depository.OrderProcessed
+			if js.Accrual > 0 {
+				result.Accrual = js.Accrual
+			}
+			return
+		}
+	}
+	return
+}
+
+func (l *Loader) NupdateOrder(ch Order) {
+	logger.Log.Infof("loader: data is received from the channel")
+	tx, err := l.Depository.DB.Begin()
+	if err != nil {
+		return
+	}
+	logger.Log.Infof("loader: DB transaction begin")
+	if ch.Status != "" {
+		err = l.Depository.OrderStatusUpdate(ch.Order, ch.Status, ch.Accrual, tx)
+		if err != nil {
+			tx.Rollback()
+		}
+		var userID int
+		userID, err = l.Depository.OrderUserCheck(ch.Order)
+		if err != nil {
+			tx.Rollback()
+		}
+		if ch.Accrual > 0 {
+			err = l.Depository.UserBalanceUpdate(userID, ch.Accrual, 0, tx)
+			if err != nil {
+				tx.Rollback()
+			}
+		}
+	}
+	tx.Commit()
+	logger.Log.Infof("loader: DB transaction commit")
+}
+
+func (b *Buffer) read() (res Order, r bool) {
+	if len(b.Orders) > 0 {
+		b.Mu.Lock()
+		defer b.Mu.Unlock()
+		res = b.Orders[0]
+		if len(b.Orders) > 1 {
+			b.Orders = b.Orders[1 : len(b.Orders)-1]
+		} else {
+			b.Orders = b.Orders[:0]
+		}
+		r = true
+	}
+	return
+}
+
+func (b *Buffer) write(i Order) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+	b.Orders = append(b.Orders, i)
+}
+
+func (q *Quere) sendOrderToProcessing(o Order) bool {
+	if len(q.Processing) < 100 {
+		logger.Log.Infof("loader: order %v from buffer send to processing channel", o.Order)
+		q.Processing <- o
+		return true
+	}
+	return false
+}
+func (l *Loader) sendNewOrdersToQuere() {
+	for o := range l.Quere.NewOrders {
+		if !l.Quere.sendOrderToProcessing(o) {
+			logger.Log.Infof("loader: order %v from neworders can't send to processing channel and write to heap", o.Order)
+			heap.Push(&l.Quere.PriorityQueue, &Item{value: o, priority: o.getPriority(), index: len(l.Quere.PriorityQueue)})
+		}
+	}
+}
+
+func (l *Loader) sendOrdersFromBufferToProcessing() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		var max int
+		if cap(l.Quere.Processing)-10 > len(l.Quere.PriorityQueue) {
+			max = len(l.Quere.PriorityQueue)
+		} else {
+			max = cap(l.Quere.Processing) - 10
+		}
+		for i := len(l.Quere.Processing); i < max; i++ {
+			e := heap.Pop(&l.Quere.PriorityQueue).(*Item)
+			if !l.Quere.sendOrderToProcessing(e.value) {
+				logger.Log.Infof("loader: order %v from heap can't send to processing channel and write to heap", e)
+				heap.Push(&l.Quere.PriorityQueue, &e)
+				l.Quere.PriorityQueue.update(e, e.value, e.value.getPriority())
+			}
+			if len(l.Quere.Processing) > i {
+				i = len(l.Quere.Processing)
+			}
+		}
+	}
+}
+
+func (l *Loader) QuereManager() {
+	go l.sendNewOrdersToQuere()
+	go l.sendOrdersFromBufferToProcessing()
 }

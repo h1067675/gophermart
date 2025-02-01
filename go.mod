@@ -28,4 +28,5 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/theplant/luhn v0.0.0-20170224032821-81a1a381387a
 	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/time v0.9.0
 )

@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/h1067675/gophermart/cmd/depository"
+	"github.com/h1067675/gophermart/cmd/loader"
 	"github.com/h1067675/gophermart/internal/configurer"
 	"github.com/h1067675/gophermart/internal/logger"
 )
@@ -180,7 +182,8 @@ func TestUserRegisterHandler(t *testing.T) {
 	var configurer Configurer
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
-	var connector = InitializeRouter(depositary, config)
+	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
+	var connector = InitializeRouter(depositary, config, loader)
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -355,7 +358,8 @@ func TestUserLoginHandler(t *testing.T) {
 	var configurer Configurer
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
-	var connector = InitializeRouter(depositary, config)
+	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
+	var connector = InitializeRouter(depositary, config, loader)
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
@@ -659,7 +663,8 @@ func TestUserLoadOrdersHandler(t *testing.T) {
 	var configurer Configurer
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
-	var connector = InitializeRouter(depositary, config)
+	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
+	var connector = InitializeRouter(depositary, config, loader)
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
@@ -823,13 +828,14 @@ func TestUserGetOrdersHandler(t *testing.T) {
 	var configurer Configurer
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
-	var connector = InitializeRouter(depositary, config)
+	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
+	var connector = InitializeRouter(depositary, config, loader)
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
 		userID, _ := connector.Depository.UserAuthorization(user.login, user.password)
 		for _, order := range user.orders {
-			connector.Depository.OrderNew(userID, order.order)
+			connector.Depository.OrderNew(userID, order.order, depository.OrderNew)
 		}
 	}
 	for _, test := range tests {
@@ -963,7 +969,8 @@ func TestUserGetBalanceHandler(t *testing.T) {
 	var configurer Configurer
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
-	var connector = InitializeRouter(depositary, config)
+	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
+	var connector = InitializeRouter(depositary, config, loader)
 
 	tx, err := depositary.DB.Begin()
 	if err != nil {
@@ -1160,7 +1167,8 @@ func TestUserGetBalanceWithdrawHandler(t *testing.T) {
 	var configurer Configurer
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
-	var connector = InitializeRouter(depositary, config)
+	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
+	var connector = InitializeRouter(depositary, config, loader)
 
 	tx, err := depositary.DB.Begin()
 	if err != nil {
@@ -1329,7 +1337,8 @@ func TestUserGetWithdrawalsHandler(t *testing.T) {
 	var configurer Configurer
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
-	var connector = InitializeRouter(depositary, config)
+	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
+	var connector = InitializeRouter(depositary, config, loader)
 
 	tx, err := depositary.DB.Begin()
 	if err != nil {

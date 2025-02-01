@@ -15,6 +15,7 @@ const (
 	OrderProcessing = "PROCESSING"
 	OrderInvalid    = "INVALID"
 	OrderProcessed  = "PROCESSED"
+	OrderLoad       = "LOAD"
 )
 
 type UserOrders struct {
@@ -49,9 +50,9 @@ func (s *Storage) OrderUserCheck(order int) (userID int, err error) {
 	return userID, nil
 }
 
-func (s *Storage) OrderNew(user int, order int) bool {
+func (s *Storage) OrderNew(user int, order int, status string) bool {
 	var err error
-	row := s.DB.QueryRow("INSERT INTO orders (order_number, status) VALUES ($1,$2) RETURNING id;", order, OrderNew)
+	row := s.DB.QueryRow("INSERT INTO orders (order_number, status) VALUES ($1,$2) RETURNING id;", order, status)
 	var id string
 	err = row.Scan(&id)
 	if err != nil {
@@ -89,11 +90,11 @@ func (s *Storage) OrderGetUserOrders(user int) (orders []UserOrders, err error) 
 	return orders, nil
 }
 
-func (s Storage) OrderGetOrdersInProcess() (orders []int, err error) {
+func (s Storage) OrderGetOrdersInProcess(lim int) (orders []int, err error) {
 	var rows *sql.Rows
 	//statuses := []string{`'` + OrderNew + `'`, `'` + OrderProcessing + `'`}
 
-	rows, err = s.DB.Query("SELECT order_number FROM orders WHERE status IN ($1, $2)", OrderNew, OrderProcessing)
+	rows, err = s.DB.Query("SELECT order_number FROM orders WHERE status IN ($1, $2) LIMIT $3", OrderNew, OrderProcessing, lim)
 	if err != nil {
 		logger.Log.WithError(err).Error("error getting data from the database")
 		return nil, err
@@ -115,6 +116,16 @@ func (s Storage) OrderGetOrdersInProcess() (orders []int, err error) {
 }
 
 func (s Storage) OrderStatusUpdate(order int, status string, accrual float64, tx *sql.Tx) (err error) {
+	_, err = tx.Exec("UPDATE orders SET status = $2, accrual = $3 WHERE order_number = $1", order, status, accrual)
+	if err != nil {
+		logger.Log.WithError(err).Error("error updating the order in the database")
+		return err
+	}
+	logger.Log.Infof("DB query: UPDATE orders SET status = %s, accrual = %v WHERE order_number = %v", status, accrual, order)
+	return nil
+}
+
+func (s Storage) OrderLoaderStatusUpdate(order int, status string, accrual float64, tx *sql.Tx) (err error) {
 	_, err = tx.Exec("UPDATE orders SET status = $2, accrual = $3 WHERE order_number = $1", order, status, accrual)
 	if err != nil {
 		logger.Log.WithError(err).Error("error updating the order in the database")

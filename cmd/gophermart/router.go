@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/h1067675/gophermart/cmd/depository"
+	"github.com/h1067675/gophermart/cmd/loader"
 	"github.com/h1067675/gophermart/internal/compress"
 	"github.com/h1067675/gophermart/internal/configurer"
 	"github.com/h1067675/gophermart/internal/logger"
@@ -16,14 +17,16 @@ type Connect struct {
 	Router     chi.Router
 	Depository *depository.Storage
 	Config     *configurer.Config
+	Loader     *loader.Loader
 }
 
 // Initialized general structure with a repositary and config
-func InitializeRouter(dep *depository.Storage, conf *configurer.Config) Connect {
+func InitializeRouter(dep *depository.Storage, conf *configurer.Config, loader *loader.Loader) Connect {
 	var c = Connect{
 		Router:     chi.NewRouter(),
 		Depository: dep,
 		Config:     conf,
+		Loader:     loader,
 	}
 	return c
 }

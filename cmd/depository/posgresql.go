@@ -36,7 +36,8 @@ var dbTables = []dbTable{
 				order_number NUMERIC UNIQUE,
 				uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
 				accrual DOUBLE PRECISION DEFAULT 0.0, 
-				status TEXT
+				status TEXT,
+				uploader_atatus BOOL
 				);`,
 	},
 	{
@@ -63,6 +64,14 @@ var dbTables = []dbTable{
 				sum DOUBLE PRECISION DEFAULT 0.0,
 				withdrawal BOOL,
 				balance DOUBLE PRECISION DEFAULT 0.0
+				);`,
+	},
+	{
+		table: "accrual_orders",
+		pgxQuery: `CREATE TABLE accrual_orders (
+				order_number NUMERIC UNIQUE,
+				sum DOUBLE PRECISION DEFAULT 0.0,
+				status TEXT
 				);`,
 	},
 }
