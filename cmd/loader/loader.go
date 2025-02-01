@@ -113,14 +113,14 @@ func (o *Order) getPriority() int {
 	return 1
 }
 
-func (n *Loader) uploader(worker int, jobs <-chan Order, results chan<- Order) {
+func (l *Loader) uploader(worker int, jobs <-chan Order, results chan<- Order) {
 	logger.Log.Infof("loader: start worker %v", worker)
 	for j := range jobs {
 		start := time.Now()
 		logger.Log.Infof("loader: order received %v to worker %v", j.Order, worker)
-		res, err := n.NgetOrderStatusFromServerAPI(j)
+		res, err := l.NgetOrderStatusFromServerAPI(j)
 		if err != nil || res.Status != depository.OrderProcessed {
-			heap.Push(&n.Quere.PriorityQueue, &Item{value: j, priority: j.getPriority(), index: len(n.Quere.PriorityQueue)})
+			heap.Push(&l.Quere.PriorityQueue, &Item{value: j, priority: j.getPriority(), index: len(l.Quere.PriorityQueue)})
 		} else {
 			results <- res
 			logger.Log.Infof("loader: responce received %v", res)
@@ -129,13 +129,13 @@ func (n *Loader) uploader(worker int, jobs <-chan Order, results chan<- Order) {
 	}
 }
 
-func (n *Loader) NStartLoader() {
-	for w := 1; w <= n.Config.Workers; w++ {
-		go n.uploader(w, n.Quere.Processing, n.Quere.Result)
+func (l *Loader) NStartLoader() {
+	for w := 1; w <= l.Config.Workers; w++ {
+		go l.uploader(w, l.Quere.Processing, l.Quere.Result)
 	}
 
-	for j := range n.Quere.Result {
-		go n.NupdateOrder(j)
+	for j := range l.Quere.Result {
+		go l.NupdateOrder(j)
 	}
 }
 

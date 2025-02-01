@@ -100,13 +100,13 @@ func (c *Client) GETtest(server string, endpoint string) (body []byte, status in
 	return body, response.StatusCode, nil
 }
 
-func (c *Client) POSTtest(server string, endpoint string, request_body string, content_type string, cookies *[]*http.Cookie) (body []byte, status int, err error) {
+func (c *Client) POSTtest(server string, endpoint string, requestBody string, contentType string, cookies *[]*http.Cookie) (body []byte, status int, err error) {
 	client := &http.Client{}
-	request, err := http.NewRequest(http.MethodPost, "http://"+server+endpoint, strings.NewReader(request_body))
+	request, err := http.NewRequest(http.MethodPost, "http://"+server+endpoint, strings.NewReader(contentType))
 	if err != nil {
 		return nil, 0, err
 	}
-	request.Header.Add("Content-Type", content_type)
+	request.Header.Add("Content-Type", contentType)
 	for _, e := range *cookies {
 		request.AddCookie(e)
 	}

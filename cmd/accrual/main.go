@@ -61,6 +61,7 @@ func (c *Connect) getVisitor(ip string) *rate.Limiter {
 	limiter, exists := c.Visitors[ip]
 	if !exists {
 		rt := rate.Every(time.Minute)
+
 		limiter = rate.NewLimiter(rt, c.Limit)
 		c.Visitors[ip] = limiter
 	}

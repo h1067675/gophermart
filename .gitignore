@@ -22,4 +22,4 @@ vendor/
 .idea
 .vscode
 cmd/gophermart/main_test.go
-cmd/depository/accrual.go
+cmd/accrual/main.go
