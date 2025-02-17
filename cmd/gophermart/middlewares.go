@@ -4,11 +4,10 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/h1067675/gophermart/internal/authorization"
 	"github.com/h1067675/gophermart/internal/logger"
 )
 
-func (c *Connect) CookieAuthorizationMiddleware(next http.Handler) http.Handler {
+func (c *Server) CookieAuthorizationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		logger.Log.Info("cookie is not found. User is not logged")
 
@@ -24,7 +23,7 @@ func (c *Connect) CookieAuthorizationMiddleware(next http.Handler) http.Handler 
 			logger.Log.Info("cookie is not found. User is not logged")
 		} else {
 			logger.Log.Info("checking authorization by token from cookie")
-			userid, err = authorization.CheckToken(cookie.Value)
+			userid, err = c.Authorize.CheckToken(cookie.Value)
 			if err != nil {
 				logger.Log.WithError(err).Error("user is not logged")
 			}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -24,7 +23,7 @@ import (
 )
 
 // General structure
-type Connect struct {
+type Server struct {
 	Router     chi.Router
 	Depository *depository.Storage
 	Config     *configurer.Config
@@ -40,8 +39,8 @@ type BanList struct {
 }
 
 // Initialized general structure with a repositary and config
-func InitializeRouter(dep *depository.Storage, conf *configurer.Config) *Connect {
-	var c = Connect{
+func InitializeRouter(dep *depository.Storage, conf *configurer.Config) *Server {
+	var c = Server{
 		Router:     chi.NewRouter(),
 		Depository: dep,
 		Config:     conf,
@@ -54,7 +53,7 @@ func InitializeRouter(dep *depository.Storage, conf *configurer.Config) *Connect
 // Retrieve and return the rate limiter for the current visitor if it
 // already exists. Otherwise create a new rate limiter and add it to
 // the visitors map, using the IP address as the key.
-func (c *Connect) getVisitor(ip string) *rate.Limiter {
+func (c *Server) getVisitor(ip string) *rate.Limiter {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 
@@ -69,17 +68,24 @@ func (c *Connect) getVisitor(ip string) *rate.Limiter {
 	return limiter
 }
 
-func (c *Connect) limit(next http.Handler) http.Handler {
+func (c *Server) getLimiter(address string) (*rate.Limiter, error) {
+	ip, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+
+	limiter := c.getVisitor(ip)
+
+	return limiter, nil
+}
+
+func (c *Server) limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		limiter, err := c.getLimiter(r.RemoteAddr)
 		if err != nil {
-			logger.Log.Debug()
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-
-		limiter := c.getVisitor(ip)
-
 		if !limiter.Allow() {
 			w.Header().Add("Retry-After", strconv.Itoa(int(limiter.Reserve().Delay()/time.Second)))
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -92,7 +98,7 @@ func (c *Connect) limit(next http.Handler) http.Handler {
 }
 
 // load user number order
-func (c *Connect) AccrualHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) AccrualHandler(response http.ResponseWriter, request *http.Request) {
 	o := chi.URLParam(request, "order")
 	if o == "" {
 		logger.Log.Info("wrong order")
@@ -136,7 +142,7 @@ func (c *Connect) AccrualHandler(response http.ResponseWriter, request *http.Req
 }
 
 // Routing http requests to edpoints
-func (c *Connect) Route() chi.Router {
+func (c *Server) Route() chi.Router {
 	// Use all middleware-functions
 	c.Router.Use(logger.ResponseLogging)
 	c.Router.Use(c.limit)
@@ -149,9 +155,7 @@ func (c *Connect) Route() chi.Router {
 	return c.Router
 }
 
-func (c *Connect) StartServer() error {
-	ctx := context.Background()
-	defer ctx.Done()
+func (c *Server) StartServer() error {
 	if err := http.ListenAndServe(c.Config.GetAccrualSystemAddress(), c.Route()); err != nil {
 		logger.Log.WithError(err).Errorf("error starting the server with a network address %s", c.Config.GetAccrualSystemAddress())
 		return err
@@ -167,7 +171,7 @@ func main() {
 		"localhost:8090",
 		false)
 	var depositary = depository.InitializeStorager(conf)
-	var connector = InitializeRouter(depositary, conf)
-	connector.StartServer()
+	var server = InitializeRouter(depositary, conf)
+	server.StartServer()
 
 }

@@ -7,32 +7,35 @@ import (
 
 	"github.com/h1067675/gophermart/cmd/depository"
 	"github.com/h1067675/gophermart/cmd/loader"
+	"github.com/h1067675/gophermart/internal/authorization"
 	"github.com/h1067675/gophermart/internal/compress"
 	"github.com/h1067675/gophermart/internal/configurer"
 	"github.com/h1067675/gophermart/internal/logger"
 )
 
 // General structure
-type Connect struct {
+type Server struct {
 	Router     chi.Router
 	Depository *depository.Storage
 	Config     *configurer.Config
 	Loader     *loader.Loader
+	Authorize  *authorization.Autorize
 }
 
 // Initialized general structure with a repositary and config
-func InitializeRouter(dep *depository.Storage, conf *configurer.Config, loader *loader.Loader) Connect {
-	var c = Connect{
+func InitializeRouter(dep *depository.Storage, conf *configurer.Config, loader *loader.Loader, auth *authorization.Autorize) Server {
+	var c = Server{
 		Router:     chi.NewRouter(),
 		Depository: dep,
 		Config:     conf,
 		Loader:     loader,
+		Authorize:  auth,
 	}
 	return c
 }
 
 // Routing http requests to edpoints
-func (c *Connect) Route() chi.Router {
+func (c *Server) Route() chi.Router {
 	// Use all middleware-functions
 	c.Router.Use(c.CookieAuthorizationMiddleware)
 	c.Router.Use(compress.CompressHandler)
@@ -66,7 +69,7 @@ func (c *Connect) Route() chi.Router {
 	return c.Router
 }
 
-func (c *Connect) StartServer() error {
+func (c *Server) StartServer() error {
 	if err := http.ListenAndServe(c.Config.GetRunAddress(), c.Route()); err != nil {
 		logger.Log.WithError(err).Errorf("error starting the server with a network address %s", c.Config.GetRunAddress())
 		return err

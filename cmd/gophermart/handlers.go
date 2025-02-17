@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/h1067675/gophermart/cmd/depository"
 	"github.com/h1067675/gophermart/cmd/loader"
-	"github.com/h1067675/gophermart/internal/authorization"
 	"github.com/h1067675/gophermart/internal/logger"
 )
 
@@ -69,7 +69,7 @@ func setAuthirizationCookie(response http.ResponseWriter, token string) {
 }
 
 // user resister handler
-func (c *Connect) UserRegisterHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) UserRegisterHandler(response http.ResponseWriter, request *http.Request) {
 	if !strings.Contains(request.Header.Get("Content-Type"), "application/json") {
 		response.WriteHeader(http.StatusBadRequest)
 		return
@@ -96,7 +96,7 @@ func (c *Connect) UserRegisterHandler(response http.ResponseWriter, request *htt
 	}
 
 	logger.Log.Infof("user %s is register", register.Login)
-	token, err := authorization.SetToken(userID)
+	token, err := c.Authorize.SetToken(userID)
 	if err != nil {
 		logger.Log.Infof("error creating token for user %s", register.Login)
 		response.WriteHeader(http.StatusInternalServerError)
@@ -108,7 +108,7 @@ func (c *Connect) UserRegisterHandler(response http.ResponseWriter, request *htt
 }
 
 // user login handler
-func (c *Connect) UserLoginHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) UserLoginHandler(response http.ResponseWriter, request *http.Request) {
 	if !strings.Contains(request.Header.Get("Content-Type"), "application/json") {
 		response.WriteHeader(http.StatusBadRequest)
 		return
@@ -123,7 +123,7 @@ func (c *Connect) UserLoginHandler(response http.ResponseWriter, request *http.R
 		response.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	token, err := authorization.UserAuthorization(c.Depository, loginUser.Login, loginUser.Password)
+	token, err := c.Authorize.UserAuthorization(c.Depository, loginUser.Login, loginUser.Password)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			response.WriteHeader(http.StatusUnauthorized)
@@ -139,7 +139,7 @@ func (c *Connect) UserLoginHandler(response http.ResponseWriter, request *http.R
 
 // POST /api/user/orders
 // load user number order
-func (c *Connect) UserLoadOrdersHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) UserLoadOrdersHandler(response http.ResponseWriter, request *http.Request) {
 	userID := request.Context().Value(KeyUserID)
 	if userID == nil || userID.(int) <= 0 {
 		response.WriteHeader(http.StatusUnauthorized)
@@ -201,7 +201,7 @@ func (c *Connect) UserLoadOrdersHandler(response http.ResponseWriter, request *h
 }
 
 // GET /api/user/orders
-func (c *Connect) UserGetOrdersHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) UserGetOrdersHandler(response http.ResponseWriter, request *http.Request) {
 	userID := request.Context().Value(KeyUserID)
 	if userID == nil || userID.(int) <= 0 {
 		response.WriteHeader(http.StatusUnauthorized)
@@ -229,7 +229,7 @@ func (c *Connect) UserGetOrdersHandler(response http.ResponseWriter, request *ht
 }
 
 // GET /api/user/balance
-func (c *Connect) UserGetBalanceHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) UserGetBalanceHandler(response http.ResponseWriter, request *http.Request) {
 	userID := request.Context().Value(KeyUserID)
 	if userID == nil || userID.(int) <= 0 {
 		response.WriteHeader(http.StatusUnauthorized)
@@ -257,8 +257,24 @@ type withdrawal struct {
 	Sum   float64 `json:"sum"`
 }
 
+func valideWithdrawalRequest(body []byte) (*withdrawal, error) {
+	var w withdrawal
+	err := json.Unmarshal(body, &w)
+	if err != nil {
+		return nil, err
+	}
+	order, err := strconv.Atoi(w.Order)
+	if err != nil {
+		return nil, fmt.Errorf("wrong order format (is not number) %s", err)
+	}
+	if !luhn.Valid(order) {
+		return nil, fmt.Errorf("wrong order format (is not Luhn)")
+	}
+	return &w, nil
+}
+
 // POST /api/user/balance/withdraw
-func (c *Connect) UserGetBalanceWithdrawHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) UserGetBalanceWithdrawHandler(response http.ResponseWriter, request *http.Request) {
 	userID := request.Context().Value(KeyUserID)
 	if userID == nil || userID.(int) <= 0 {
 		response.WriteHeader(http.StatusUnauthorized)
@@ -269,26 +285,14 @@ func (c *Connect) UserGetBalanceWithdrawHandler(response http.ResponseWriter, re
 		logger.Log.WithError(err).Info("body getting error")
 		response.WriteHeader(http.StatusInternalServerError)
 	}
-	var w withdrawal
-	err = json.Unmarshal(js, &w)
+
+	w, err := valideWithdrawalRequest(js)
 	if err != nil {
-		logger.Log.WithError(err).Info("json parsimg error")
-		response.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	var order int
-	order, err = strconv.Atoi(w.Order)
-	if err != nil {
-		logger.Log.Info("wrong order format (is not number)")
 		response.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
-	if !luhn.Valid(order) {
-		logger.Log.Info("wrong order format (is not Luhn)")
-		response.WriteHeader(http.StatusUnprocessableEntity)
-		return
-	}
-	err = c.Depository.UserWithdrawal(userID.(int), order, w.Sum)
+
+	err = c.Depository.UserWithdrawal(userID.(int), w.Order, w.Sum)
 	if err != nil {
 		if errors.Is(err, depository.ErrInsufficientBalance) {
 			response.WriteHeader(http.StatusPaymentRequired)
@@ -301,7 +305,7 @@ func (c *Connect) UserGetBalanceWithdrawHandler(response http.ResponseWriter, re
 }
 
 // GET /api/user/withdrawals
-func (c *Connect) UserGetWithdrawalsHandler(response http.ResponseWriter, request *http.Request) {
+func (c *Server) UserGetWithdrawalsHandler(response http.ResponseWriter, request *http.Request) {
 	userID := request.Context().Value(KeyUserID)
 	if userID == nil || userID.(int) <= 0 {
 		response.WriteHeader(http.StatusUnauthorized)

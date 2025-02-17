@@ -77,7 +77,6 @@ func (l *Loader) wait(s string) {
 
 func InitializeLoader(depository *depository.Storage, server string, periodicity time.Duration, workers int) *Loader {
 	var c client.Client
-	c.Init()
 	var loader = Loader{
 		QueryLimit: QueryLimit{
 			QueryLimit: 1000,
@@ -129,7 +128,7 @@ func (l *Loader) uploader(worker int, jobs <-chan Order, results chan<- Order) {
 	}
 }
 
-func (l *Loader) NStartLoader() {
+func (l *Loader) StartLoaderWorkers() {
 	for w := 1; w <= l.Config.Workers; w++ {
 		go l.uploader(w, l.Quere.Processing, l.Quere.Result)
 	}
@@ -185,7 +184,45 @@ func (q *QueryLimit) remove() {
 	}()
 	q.QueryTicker--
 }
+func getCountAllowedRequestsPerMinuteFromResponse(body string) (int, error) {
+	s := strings.Replace(string(body), "No more than ", "", -1)
+	s = strings.Replace(s, " requests per minute allowed", "", -1)
+	lim, err := strconv.Atoi(s)
+	if err != nil {
+		logger.Log.Errorf("number parse error %s", err)
+		return -1, err
+	}
+	return lim, nil
+}
 
+func (l *Loader) checkResponseStatus(status int, body []byte, timeout int) *responseCalculator {
+	switch status {
+	case http.StatusTooManyRequests:
+		logger.Log.Infof("loader: answer - get response with status Too Many Requests and timeout %v", timeout)
+		lim, err := getCountAllowedRequestsPerMinuteFromResponse(string(body))
+		if err == nil {
+			logger.Log.Infof("loader:set new query limit is %v times in second", lim)
+			l.QueryLimit.setNewQueryLimit(lim)
+		}
+		return nil
+	case http.StatusNoContent:
+
+	case http.StatusOK:
+		var js responseCalculator
+		err := json.Unmarshal(body, &js)
+		if err != nil {
+			logger.Log.WithError(err).Error("loader: json parsing error")
+			return nil
+		}
+		_, err = strconv.Atoi(js.Order)
+		if err != nil {
+			logger.Log.WithError(err).Error("loader: order is not number")
+			return nil
+		}
+		return &js
+	}
+	return nil
+}
 func (l *Loader) NgetOrderStatusFromServerAPI(order Order) (result Order, err error) {
 	result = order
 	logger.Log.Infof("loader: query - GET %s/api/orders/%v", l.Config.Server, order)
@@ -197,42 +234,8 @@ func (l *Loader) NgetOrderStatusFromServerAPI(order Order) (result Order, err er
 		logger.Log.WithError(err).Error("error getting status from outer sistem")
 		return
 	}
-	if HTTPStatus == http.StatusTooManyRequests {
-		logger.Log.Infof("loader: answer - get response with status Too Many Requests and timeout %v", timeout)
-		s := strings.Replace(string(body), "No more than ", "", -1)
-		s = strings.Replace(s, " requests per minute allowed", "", -1)
-		lim, err2 := strconv.Atoi(s)
-		if err2 != nil {
-			logger.Log.Error(err)
-		} else {
-			logger.Log.Infof("loader:set new query limit is %v times in second", lim)
-			l.QueryLimit.setNewQueryLimit(lim)
-		}
-		result.Times += 3
-		return
-	}
 	result.Times++
-	if HTTPStatus == http.StatusNoContent {
-		result.Times += 3
-		return
-	}
-	if HTTPStatus == http.StatusOK {
-		var js responseCalculator
-		err = json.Unmarshal(body, &js)
-		if err != nil {
-			logger.Log.WithError(err).Error("loader: json parsing error")
-			return
-		}
-		var outOrder int
-		outOrder, err = strconv.Atoi(js.Order)
-		if err != nil {
-			logger.Log.WithError(err).Error("loader: order is not number")
-			return
-		}
-		if order.Order != outOrder {
-			logger.Log.Info("loader: order number from the external service does not match the internal number")
-			return
-		}
+	if js := l.checkResponseStatus(HTTPStatus, body, timeout); js != nil {
 		if js.Status == depository.OrderProcessed {
 			result.Status = depository.OrderProcessed
 			if js.Accrual > 0 {
@@ -272,26 +275,26 @@ func (l *Loader) NupdateOrder(ch Order) {
 	logger.Log.Infof("loader: DB transaction commit")
 }
 
-func (b *Buffer) read() (res Order, r bool) {
-	if len(b.Orders) > 0 {
-		b.Mu.Lock()
-		defer b.Mu.Unlock()
-		res = b.Orders[0]
-		if len(b.Orders) > 1 {
-			b.Orders = b.Orders[1 : len(b.Orders)-1]
-		} else {
-			b.Orders = b.Orders[:0]
-		}
-		r = true
-	}
-	return
-}
+// func (b *Buffer) read() (res Order, r bool) {
+// 	if len(b.Orders) > 0 {
+// 		b.Mu.Lock()
+// 		defer b.Mu.Unlock()
+// 		res = b.Orders[0]
+// 		if len(b.Orders) > 1 {
+// 			b.Orders = b.Orders[1 : len(b.Orders)-1]
+// 		} else {
+// 			b.Orders = b.Orders[:0]
+// 		}
+// 		r = true
+// 	}
+// 	return
+// }
 
-func (b *Buffer) write(i Order) {
-	b.Mu.Lock()
-	defer b.Mu.Unlock()
-	b.Orders = append(b.Orders, i)
-}
+// func (b *Buffer) write(i Order) {
+// 	b.Mu.Lock()
+// 	defer b.Mu.Unlock()
+// 	b.Orders = append(b.Orders, i)
+// }
 
 func (q *Quere) sendOrderToProcessing(o Order) bool {
 	if len(q.Processing) < 100 {

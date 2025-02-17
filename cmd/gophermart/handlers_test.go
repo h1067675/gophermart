@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/h1067675/gophermart/cmd/depository"
 	"github.com/h1067675/gophermart/cmd/loader"
+	"github.com/h1067675/gophermart/internal/authorization"
 	"github.com/h1067675/gophermart/internal/configurer"
 	"github.com/h1067675/gophermart/internal/logger"
 )
@@ -186,7 +188,8 @@ func TestUserRegisterHandler(t *testing.T) {
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
-	var connector = InitializeRouter(depositary, config, loader)
+	var auth = authorization.InitializeAuthorizator(config.SecretKey.String())
+	var connector = InitializeRouter(depositary, config, loader, auth)
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -362,7 +365,8 @@ func TestUserLoginHandler(t *testing.T) {
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
-	var connector = InitializeRouter(depositary, config, loader)
+	var auth = authorization.InitializeAuthorizator(config.SecretKey.String())
+	var connector = InitializeRouter(depositary, config, loader, auth)
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
@@ -667,7 +671,8 @@ func TestUserLoadOrdersHandler(t *testing.T) {
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
-	var connector = InitializeRouter(depositary, config, loader)
+	var auth = authorization.InitializeAuthorizator(config.SecretKey.String())
+	var connector = InitializeRouter(depositary, config, loader, auth)
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
@@ -676,7 +681,7 @@ func TestUserLoadOrdersHandler(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// login user
 			var userID int
-			userID, _ = connector.Depository.UserAuthorization(test.login.login, test.login.password)
+			userID, _ = connector.Depository.UserDBAuthorization(test.login.login, test.login.password)
 			b := strings.NewReader(test.req.body)
 
 			request := httptest.NewRequest(http.MethodPost, test.req.handler, b)
@@ -832,11 +837,12 @@ func TestUserGetOrdersHandler(t *testing.T) {
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
-	var connector = InitializeRouter(depositary, config, loader)
+	var auth = authorization.InitializeAuthorizator(config.SecretKey.String())
+	var connector = InitializeRouter(depositary, config, loader, auth)
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
-		userID, _ := connector.Depository.UserAuthorization(user.login, user.password)
+		userID, _ := connector.Depository.UserDBAuthorization(user.login, user.password)
 		for _, order := range user.orders {
 			connector.Depository.OrderNew(userID, order.order, depository.OrderNew)
 		}
@@ -845,7 +851,7 @@ func TestUserGetOrdersHandler(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// login user
 			var userID int
-			userID, _ = connector.Depository.UserAuthorization(test.login.login, test.login.password)
+			userID, _ = connector.Depository.UserDBAuthorization(test.login.login, test.login.password)
 			request := httptest.NewRequest(http.MethodPost, test.req.handler, nil)
 			ctx := context.WithValue(context.TODO(), KeyUserID, userID)
 			request = request.WithContext(ctx)
@@ -973,7 +979,8 @@ func TestUserGetBalanceHandler(t *testing.T) {
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
-	var connector = InitializeRouter(depositary, config, loader)
+	var auth = authorization.InitializeAuthorizator(config.SecretKey.String())
+	var connector = InitializeRouter(depositary, config, loader, auth)
 
 	tx, err := depositary.DB.Begin()
 	if err != nil {
@@ -983,7 +990,7 @@ func TestUserGetBalanceHandler(t *testing.T) {
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
-		userID, _ := connector.Depository.UserAuthorization(user.login, user.password)
+		userID, _ := connector.Depository.UserDBAuthorization(user.login, user.password)
 		err = connector.Depository.UserBalanceUpdate(userID, user.balance, user.withdrawn, tx)
 		if err != nil {
 			tx.Rollback()
@@ -996,7 +1003,7 @@ func TestUserGetBalanceHandler(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// login user
 			var userID int
-			userID, _ = connector.Depository.UserAuthorization(test.login.login, test.login.password)
+			userID, _ = connector.Depository.UserDBAuthorization(test.login.login, test.login.password)
 
 			request := httptest.NewRequest(http.MethodPost, test.req.handler, nil)
 			ctx := context.WithValue(context.TODO(), KeyUserID, userID)
@@ -1171,7 +1178,8 @@ func TestUserGetBalanceWithdrawHandler(t *testing.T) {
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
-	var connector = InitializeRouter(depositary, config, loader)
+	var auth = authorization.InitializeAuthorizator(config.SecretKey.String())
+	var connector = InitializeRouter(depositary, config, loader, auth)
 
 	tx, err := depositary.DB.Begin()
 	if err != nil {
@@ -1181,7 +1189,7 @@ func TestUserGetBalanceWithdrawHandler(t *testing.T) {
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
-		userID, _ := connector.Depository.UserAuthorization(user.login, user.password)
+		userID, _ := connector.Depository.UserDBAuthorization(user.login, user.password)
 		err = connector.Depository.UserBalanceUpdate(userID, user.balance, user.withdrawn, tx)
 		if err != nil {
 			tx.Rollback()
@@ -1194,7 +1202,7 @@ func TestUserGetBalanceWithdrawHandler(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// login user
 			var userID int
-			userID, _ = connector.Depository.UserAuthorization(test.login.login, test.login.password)
+			userID, _ = connector.Depository.UserDBAuthorization(test.login.login, test.login.password)
 			b := strings.NewReader(test.req.body)
 
 			request := httptest.NewRequest(http.MethodPost, test.req.handler, b)
@@ -1341,7 +1349,8 @@ func TestUserGetWithdrawalsHandler(t *testing.T) {
 	config := configurer.InitializeConfigurer("127.0.0.1:8080", "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=12345678 connect_timeout=10 sslmode=prefer", "127.0.0.1:8090", true)
 	var depositary = depository.InitializeStorager(config)
 	var loader = loader.InitializeLoader(depositary, config.GetAccrualSystemAddress(), time.Second*1, 4)
-	var connector = InitializeRouter(depositary, config, loader)
+	var auth = authorization.InitializeAuthorizator(config.SecretKey.String())
+	var connector = InitializeRouter(depositary, config, loader, auth)
 
 	tx, err := depositary.DB.Begin()
 	if err != nil {
@@ -1351,7 +1360,7 @@ func TestUserGetWithdrawalsHandler(t *testing.T) {
 
 	for _, user := range users {
 		connector.Depository.UserRegister(user.login, user.password)
-		userID, _ := connector.Depository.UserAuthorization(user.login, user.password)
+		userID, _ := connector.Depository.UserDBAuthorization(user.login, user.password)
 		err = connector.Depository.UserBalanceUpdate(userID, user.balance, user.withdrawn, tx)
 		if err != nil {
 			tx.Rollback()
@@ -1362,9 +1371,9 @@ func TestUserGetWithdrawalsHandler(t *testing.T) {
 	tx.Commit()
 
 	for _, user := range users {
-		userID, _ := connector.Depository.UserAuthorization(user.login, user.password)
+		userID, _ := connector.Depository.UserDBAuthorization(user.login, user.password)
 		for _, transaction := range user.transactions {
-			depositary.UserWithdrawal(userID, transaction.order, transaction.sum)
+			depositary.UserWithdrawal(userID, strconv.Itoa(transaction.order), transaction.sum)
 		}
 	}
 
@@ -1372,7 +1381,7 @@ func TestUserGetWithdrawalsHandler(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// login user
 			var userID int
-			userID, _ = connector.Depository.UserAuthorization(test.login.login, test.login.password)
+			userID, _ = connector.Depository.UserDBAuthorization(test.login.login, test.login.password)
 
 			request := httptest.NewRequest(http.MethodPost, test.req.handler, nil)
 			ctx := context.WithValue(context.TODO(), KeyUserID, userID)

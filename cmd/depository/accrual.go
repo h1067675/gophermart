@@ -8,13 +8,13 @@ import (
 	"github.com/h1067675/gophermart/internal/logger"
 )
 
-type accrualAnswer struct {
+type AccrualResponse struct {
 	Order   string  `json:"order"`
 	Status  string  `json:"status"`
 	Accrual float64 `json:"accrual"`
 }
 
-func (s *Storage) OrderAccrual(order int) (res accrualAnswer, err error) {
+func (s *Storage) OrderAccrual(order int) (res AccrualResponse, err error) {
 	row := s.DB.QueryRow("SELECT order_number, status, sum FROM accrual_orders WHERE order_number = $1;", order)
 	err = row.Scan(&res.Order, &res.Status, &res.Accrual)
 	if err != nil {

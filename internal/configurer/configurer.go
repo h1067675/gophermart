@@ -16,9 +16,10 @@ import (
 // structure of the server settings
 type Config struct {
 	RunAddress           NetAddress
-	DatabaseURI          DatabasePath
+	DatabaseURI          StringEnv
 	AccrualSystemAddress NetAddress
 	ReloadTables         bool
+	SecretKey            StringEnv
 }
 
 // structure of the network address format
@@ -59,20 +60,20 @@ func (n *NetAddress) Set(s string) (err error) {
 	return nil
 }
 
-type DatabasePath struct {
-	Path string
+type StringEnv struct {
+	Value string
 }
 
 // Сохраняет значение переменной среды
-func (n *DatabasePath) Set(s string) (err error) {
-	n.Path = s
+func (n *StringEnv) Set(s string) (err error) {
+	n.Value = s
 	logger.Log.Info("getting value from flag - ", s)
 	return nil
 }
 
 // возвращаем путь файла
-func (n *DatabasePath) String() string {
-	return n.Path
+func (n *StringEnv) String() string {
+	return n.Value
 }
 
 // structure of environment variables
@@ -80,6 +81,7 @@ type EnvConfig struct {
 	RunAddress           string `env:"RUN_ADDRESS"`
 	DatabaseURI          string `env:"DATABASE_URI"`
 	AccrualSystemAddress string `env:"ACCRUAL_SYSTEM_ADDRESS"`
+	SecretKey            string `env:"SECRET_KEY"`
 }
 
 // сreating server settins
@@ -155,5 +157,9 @@ func (c *Config) EnvConfigSet() {
 	if envCnf.AccrualSystemAddress != "" {
 		c.AccrualSystemAddress.Set(envCnf.AccrualSystemAddress)
 		logger.Log.Info("getting AccrualSystemAddress from ENV - ", envCnf.AccrualSystemAddress)
+	}
+	if envCnf.SecretKey != "" {
+		c.SecretKey.Set(envCnf.SecretKey)
+		logger.Log.Info("getting SecretKey from ENV - ", envCnf.SecretKey)
 	}
 }

@@ -19,11 +19,14 @@ type TooManyRequests struct {
 	retryTime time.Time
 }
 
-var ErrTooManyRequests = errors.New("too many requests to server")
-
-func (c *Client) Init() {
-	c.TooManyRequests = make(map[string]TooManyRequests)
+type HTTPClient interface {
+	Client
+	GET(server string, endpoint string, order int) (body []byte, status int, timeout int, err error)
+	GETtest(server string, endpoint string) (body []byte, status int, err error)
+	POSTtest(server string, endpoint string, requestBody string, contentType string, cookies *[]*http.Cookie) (body []byte, status int, err error)
 }
+
+var ErrTooManyRequests = errors.New("too many requests to server")
 
 func (c *Client) init() {
 	c.TooManyRequests = make(map[string]TooManyRequests)

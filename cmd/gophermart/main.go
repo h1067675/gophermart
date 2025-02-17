@@ -8,6 +8,7 @@ import (
 
 	"github.com/h1067675/gophermart/cmd/depository"
 	"github.com/h1067675/gophermart/cmd/loader"
+	"github.com/h1067675/gophermart/internal/authorization"
 	"github.com/h1067675/gophermart/internal/configurer"
 	"github.com/h1067675/gophermart/internal/logger"
 )
@@ -28,10 +29,11 @@ func main() {
 		false)
 	var depositary = depository.InitializeStorager(conf)
 	var loader = loader.InitializeLoader(depositary, conf.GetAccrualSystemAddress(), time.Second*30, 10)
+	var auth = authorization.InitializeAuthorizator(conf.SecretKey.String())
 	go loader.QuereManager()
-	go loader.NStartLoader()
-	var connector = InitializeRouter(depositary, conf, loader)
+	go loader.StartLoaderWorkers()
+	var server = InitializeRouter(depositary, conf, loader, auth)
 	logger.Info("loader is running. Outer server: ", loader.Config.Server)
-	connector.StartServer()
+	server.StartServer()
 
 }

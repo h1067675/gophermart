@@ -71,7 +71,7 @@ func (s Storage) UserRegister(login string, pass string) (int, error) {
 	return -1, err
 }
 
-func (s *Storage) UserAuthorization(login string, password string) (userID int, err error) {
+func (s *Storage) UserDBAuthorization(login string, password string) (userID int, err error) {
 	var cryptPass string
 	cryptPass, err = cryptPassword(password)
 	if err != nil {
@@ -107,7 +107,7 @@ func (s Storage) UserGetBalance(userID int) (UserBalance, error) {
 }
 
 // transaction
-func (s Storage) UserWithdrawal(userID int, order int, sum float64) error {
+func (s Storage) UserWithdrawal(userID int, order string, sum float64) error {
 	balance, err := s.UserGetBalance(userID)
 	if err != nil {
 		logger.Log.WithError(err).Error("balance getting error")
